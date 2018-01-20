@@ -69,7 +69,7 @@ func (db *datastoreDB) GetBook(id int64) (*Book, error) {
 
 // AddBook saves a given book, assigning it a new ID.
 func (db *datastoreDB) AddBook(b *Book) (id int64, err error) {
-	saveToDB()
+	//saveToDB()
 	ctx := context.Background()
 	k := datastore.IncompleteKey("Book", nil)
 	l := datastore.IncompleteKey("Book", nil)
@@ -147,84 +147,84 @@ func (db *datastoreDB) ListBooksCreatedBy(userID string) ([]*Book, error) {
 	return books, nil
 }
 
-func saveToDB() {
-	ctx := context.Background()
-	fileName := "temp.csv"
-	entityName := "temp"
+// func saveToDB() {
+// 	ctx := context.Background()
+// 	fileName := "temp.csv"
+// 	entityName := "temp"
 
-	data := readFile(fileName)
+// 	data := readFile(fileName)
 
-	if data == "err" {
-		return
-	}
+// 	if data == "err" {
+// 		return
+// 	}
 
-	br := bufio.NewReader(strings.NewReader(data))
-	/* 
-	 * Neglect first two lines
-	**/
-	br.ReadLine()
-	br.ReadLine()
+// 	br := bufio.NewReader(strings.NewReader(data))
+// 	/* 
+// 	 * Neglect first two lines
+// 	**/
+// 	br.ReadLine()
+// 	br.ReadLine()
 
-	reader := csv.NewReader(br)
-	reader.Comment = '*'
-	keys, keyerr := reader.Read()
-	// Remove the # in front of first key
-	keys[0] = strings.Split(keys[0], "#")[1]
-	if keyerr != nil {
-		println(keyerr.Error())
-	}
+// 	reader := csv.NewReader(br)
+// 	reader.Comment = '*'
+// 	keys, keyerr := reader.Read()
+// 	// Remove the # in front of first key
+// 	keys[0] = strings.Split(keys[0], "#")[1]
+// 	if keyerr != nil {
+// 		println(keyerr.Error())
+// 	}
 
-	for {
-		var props datastore.PropertyList
-		vals, err := reader.Read()
+// 	for {
+// 		var props datastore.PropertyList
+// 		vals, err := reader.Read()
 
-		if err == io.EOF {
-			break
-		}
+// 		if err == io.EOF {
+// 			break
+// 		}
 
-		if err != nil {
-			break
-		}
+// 		if err != nil {
+// 			break
+// 		}
 
-		for i, v := range vals {
-			k := asString(keys[i])
-			if b, berr := strconv.ParseBool(v); berr == nil {
-				props = append(props, datastore.Property{Name: k, Value: b})
-			} else if f, ferr := strconv.ParseFloat(v, 64); ferr == nil {
-				props = append(props, datastore.Property{Name: k, Value: f})
-			} else if i, ierr := strconv.ParseInt(v, 10, 64); ierr == nil {
-				props = append(props, datastore.Property{Name: k, Value: i})
-			} else {
-				props = append(props, datastore.Property{Name: k, Value: v})
-			}
-		}
-		key := datastore.NewIncompleteKey(c, entityName, nil)
-		_, err = datastore.Put(c, key, &props)
-		if err != nil {
-		}
-	}
-}
+// 		for i, v := range vals {
+// 			k := asString(keys[i])
+// 			if b, berr := strconv.ParseBool(v); berr == nil {
+// 				props = append(props, datastore.Property{Name: k, Value: b})
+// 			} else if f, ferr := strconv.ParseFloat(v, 64); ferr == nil {
+// 				props = append(props, datastore.Property{Name: k, Value: f})
+// 			} else if i, ierr := strconv.ParseInt(v, 10, 64); ierr == nil {
+// 				props = append(props, datastore.Property{Name: k, Value: i})
+// 			} else {
+// 				props = append(props, datastore.Property{Name: k, Value: v})
+// 			}
+// 		}
+// 		key := datastore.NewIncompleteKey(c, entityName, nil)
+// 		_, err = datastore.Put(c, key, &props)
+// 		if err != nil {
+// 		}
+// 	}
+// }
 
-func readFile(fileName string) string {
-	ctx := context.Background()
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		return "err"
-	}
+// func readFile(fileName string) string {
+// 	ctx := context.Background()
+// 	client, err := storage.NewClient(ctx)
+// 	if err != nil {
+// 		return "err"
+// 	}
 
-	bkt := client.Bucket("bookself-temp")
+// 	bkt := client.Bucket("bookself-temp")
 
-	r, err := bkt.Object(fileName).NewReader(ctx)
-	if err != nil {
-		return "err"
-	}
+// 	r, err := bkt.Object(fileName).NewReader(ctx)
+// 	if err != nil {
+// 		return "err"
+// 	}
 
-	defer rc.Close()
-	slurp, err := ioutil.ReadAll(r)
-	if err != nil {
-		return "err"
-	}
+// 	defer rc.Close()
+// 	slurp, err := ioutil.ReadAll(r)
+// 	if err != nil {
+// 		return "err"
+// 	}
 
-	data := string(slurp[:])
-	return data
-}
+// 	data := string(slurp[:])
+// 	return data
+// }
