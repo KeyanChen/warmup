@@ -1,0 +1,230 @@
+// Copyright 2015 Google Inc. All rights reserved.
+// Use of this source code is governed by the Apache 2.0
+// license that can be found in the LICENSE file.
+
+package bookshelf
+
+import (
+	"bufio"
+	"encoding/csv"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"strconv"
+	"strings"
+
+	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/storage"
+
+	"golang.org/x/net/context"
+)
+
+// datastoreDB persists books to Cloud Datastore.
+// https://cloud.google.com/datastore/docs/concepts/overview
+type datastoreDB struct {
+	client *datastore.Client
+}
+
+// Ensure datastoreDB conforms to the BookDatabase interface.
+var _ BookDatabase = &datastoreDB{}
+
+// newDatastoreDB creates a new BookDatabase backed by Cloud Datastore.
+// See the datastore and google packages for details on creating a suitable Client:
+// https://godoc.org/cloud.google.com/go/datastore
+func newDatastoreDB(client *datastore.Client) (BookDatabase, error) {
+	ctx := context.Background()
+	// Verify that we can communicate and authenticate with the datastore service.
+	t, err := client.NewTransaction(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("datastoredb: could not connect: %v", err)
+	}
+	if err := t.Rollback(); err != nil {
+		return nil, fmt.Errorf("datastoredb: could not connect: %v", err)
+	}
+	return &datastoreDB{
+		client: client,
+	}, nil
+}
+
+// Close closes the database.
+func (db *datastoreDB) Close() {
+	// No op.
+}
+
+func (db *datastoreDB) datastoreKey(id int64) *datastore.Key {
+	return datastore.IDKey("Book", id, nil)
+}
+
+// GetBook retrieves a book by its ID.
+func (db *datastoreDB) GetBook(id int64) (*Book, error) {
+	ctx := context.Background()
+	k := db.datastoreKey(id)
+	book := &Book{}
+	if err := db.client.Get(ctx, k, book); err != nil {
+		return nil, fmt.Errorf("datastoredb: could not get Book: %v", err)
+	}
+	book.ID = id
+	return book, nil
+}
+
+// AddBook saves a given book, assigning it a new ID.
+func (db *datastoreDB) AddBook(b *Book) (id int64, err error) {
+	saveToDB()
+	ctx := context.Background()
+	k := datastore.IncompleteKey("Book", nil)
+	l := datastore.IncompleteKey("Book", nil)
+	l, err = db.client.Put(ctx, l, b)
+	k, err = db.client.Put(ctx, k, b)
+	if err != nil {
+		return 0, fmt.Errorf("datastoredb: could not put Book: %v", err)
+	}
+	return k.ID, nil
+}
+
+// DeleteBook removes a given book by its ID.
+func (db *datastoreDB) DeleteBook(id int64) error {
+	ctx := context.Background()
+	k := db.datastoreKey(id)
+	if err := db.client.Delete(ctx, k); err != nil {
+		return fmt.Errorf("datastoredb: could not delete Book: %v", err)
+	}
+	return nil
+}
+
+// UpdateBook updates the entry for a given book.
+func (db *datastoreDB) UpdateBook(b *Book) error {
+	ctx := context.Background()
+	k := db.datastoreKey(b.ID)
+	if _, err := db.client.Put(ctx, k, b); err != nil {
+		return fmt.Errorf("datastoredb: could not update Book: %v", err)
+	}
+	return nil
+}
+
+// ListBooks returns a list of books, ordered by title.
+func (db *datastoreDB) ListBooks() ([]*Book, error) {
+	ctx := context.Background()
+	books := make([]*Book, 0)
+	q := datastore.NewQuery("Book").
+		Order("Title")
+
+	keys, err := db.client.GetAll(ctx, q, &books)
+
+	if err != nil {
+		return nil, fmt.Errorf("datastoredb: could not list books: %v", err)
+	}
+
+	for i, k := range keys {
+		books[i].ID = k.ID
+	}
+
+	return books, nil
+}
+
+// ListBooksCreatedBy returns a list of books, ordered by title, filtered by
+// the user who created the book entry.
+func (db *datastoreDB) ListBooksCreatedBy(userID string) ([]*Book, error) {
+	ctx := context.Background()
+	if userID == "" {
+		return db.ListBooks()
+	}
+
+	books := make([]*Book, 0)
+	q := datastore.NewQuery("Book").
+		Filter("CreatedByID =", userID).
+		Order("Title")
+
+	keys, err := db.client.GetAll(ctx, q, &books)
+
+	if err != nil {
+		return nil, fmt.Errorf("datastoredb: could not list books: %v", err)
+	}
+
+	for i, k := range keys {
+		books[i].ID = k.ID
+	}
+
+	return books, nil
+}
+
+func saveToDB() {
+	ctx := context.Background()
+	fileName := "temp.csv"
+	entityName := "temp"
+
+	data := readFile(fileName)
+
+	if data == "err" {
+		return
+	}
+
+	br := bufio.NewReader(strings.NewReader(data))
+	/* 
+	 * Neglect first two lines
+	**/
+	br.ReadLine()
+	br.ReadLine()
+
+	reader := csv.NewReader(br)
+	reader.Comment = '*'
+	keys, keyerr := reader.Read()
+	// Remove the # in front of first key
+	keys[0] = strings.Split(keys[0], "#")[1]
+	if keyerr != nil {
+		println(keyerr.Error())
+	}
+
+	for {
+		var props datastore.PropertyList
+		vals, err := reader.Read()
+
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			break
+		}
+
+		for i, v := range vals {
+			k := asString(keys[i])
+			if b, berr := strconv.ParseBool(v); berr == nil {
+				props = append(props, datastore.Property{Name: k, Value: b})
+			} else if f, ferr := strconv.ParseFloat(v, 64); ferr == nil {
+				props = append(props, datastore.Property{Name: k, Value: f})
+			} else if i, ierr := strconv.ParseInt(v, 10, 64); ierr == nil {
+				props = append(props, datastore.Property{Name: k, Value: i})
+			} else {
+				props = append(props, datastore.Property{Name: k, Value: v})
+			}
+		}
+		key := datastore.NewIncompleteKey(c, entityName, nil)
+		_, err = datastore.Put(c, key, &props)
+		if err != nil {
+		}
+	}
+}
+
+func readFile(fileName string) string {
+	ctx := context.Background()
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return "err"
+	}
+
+	bkt := client.Bucket("bookself-temp")
+
+	r, err := bkt.Object(fileName).NewReader(ctx)
+	if err != nil {
+		return "err"
+	}
+
+	defer rc.Close()
+	slurp, err := ioutil.ReadAll(r)
+	if err != nil {
+		return "err"
+	}
+
+	data := string(slurp[:])
+	return data
+}
